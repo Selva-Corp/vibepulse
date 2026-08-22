@@ -149,6 +149,19 @@ def _parser() -> argparse.ArgumentParser:
         help="enable or disable INSECURE compatibility for old Claude panel "
              "firmware; default off and never applies to Codex")
 
+    watch = commands.add_parser(
+        "watch", help="guided setup for the Apple Watch app: providers, "
+        "Claude Code hooks, autostart, pairing")
+    watch.add_argument("--providers", choices=("claude", "both"),
+                       default="claude")
+    watch.add_argument("--detail", action=argparse.BooleanOptionalAction,
+                       default=None)
+    watch.add_argument("--autostart", action=argparse.BooleanOptionalAction,
+                       default=None)
+
+    commands.add_parser(
+        "pair", help="display a one-time 6-digit code that hands the device "
+        "key to a watch or panel on this network")
     commands.add_parser("status", help="show saved provider switches")
     commands.add_parser("doctor", help="run read-only local diagnostics")
 
@@ -1124,6 +1137,249 @@ def _relay_doctor(config: VibePulseConfig, *, token_path: Path,
     return all(passed for passed, _label in checks)
 
 
+_HOOK_URLS = {
+    "PreToolUse": "http://127.0.0.1:8737/api/hook/question",
+    "PermissionRequest": "http://127.0.0.1:8737/api/hook/permission",
+}
+
+
+def _claude_hook_entry(event: str) -> dict:
+    matcher = "AskUserQuestion" if event == "PreToolUse" else ".*"
+    return {
+        "matcher": matcher,
+        "hooks": [{
+            "type": "http",
+            "url": _HOOK_URLS[event],
+            "timeout": 120,
+            "statusMessage": "Waiting for VibePulse…",
+        }],
+    }
+
+
+def _merge_claude_hooks(settings_path: Path, *, stdout) -> bool:
+    """Idempotently add the two VibePulse hooks to Claude Code settings.
+
+    Anything already in the file is preserved; an entry whose hook URL is
+    already ours is left untouched, so re-running the wizard changes nothing.
+    A .vibepulse-backup copy is written before the first modification.
+    """
+    try:
+        raw = settings_path.read_text() if settings_path.exists() else "{}"
+        settings = json.loads(raw)
+        if not isinstance(settings, dict):
+            raise ValueError("settings root must be an object")
+    except (OSError, ValueError) as exc:
+        print(f"FIX Could not read {settings_path}: {exc}", file=stdout)
+        return False
+    hooks = settings.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        print(f"FIX {settings_path} has a non-object hooks key; "
+              "not touching it", file=stdout)
+        return False
+    changed = False
+    for event, url in _HOOK_URLS.items():
+        entries = hooks.setdefault(event, [])
+        if not isinstance(entries, list):
+            print(f"FIX hooks.{event} is not a list; not touching it",
+                  file=stdout)
+            return False
+        present = any(
+            isinstance(entry, dict) and any(
+                isinstance(hook, dict) and hook.get("url") == url
+                for hook in entry.get("hooks", [])
+                if isinstance(entry.get("hooks"), list))
+            for entry in entries)
+        if not present:
+            entries.append(_claude_hook_entry(event))
+            changed = True
+    if not changed:
+        print("PASS Claude Code hooks already installed", file=stdout)
+        return True
+    try:
+        if settings_path.exists():
+            backup = settings_path.with_suffix(".json.vibepulse-backup")
+            backup.write_text(raw)
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    except OSError as exc:
+        print(f"FIX Could not write {settings_path}: {exc}", file=stdout)
+        return False
+    print(f"PASS Claude Code hooks installed into {settings_path} "
+          "(backup written; they load in NEW Claude Code sessions)",
+          file=stdout)
+    return True
+
+
+_LAUNCHD_LABEL = "se.torget.tokenserver"
+
+
+def _autostart_plist(repo_root: Path, home: Path) -> str:
+    server_dir = repo_root / "tools" / "tokenserver"
+    log = home / "Library" / "Logs" / "torget-tokenserver.log"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{_LAUNCHD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>-u</string>
+    <string>tokenserver.py</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>{server_dir}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>{log}</string>
+  <key>StandardErrorPath</key>
+  <string>{log}</string>
+</dict>
+</plist>
+"""
+
+
+def _install_autostart(repo_root: Path, *, launch_agents_dir: Path,
+                       run, stdout, getuid=os.getuid) -> bool:
+    """Write a personalized launchd agent and (re)start it."""
+    if sys.platform != "darwin":
+        print("OFF Autostart via launchd is macOS-only; on Windows use "
+              "install-windows-task.ps1", file=stdout)
+        return True
+    plist_path = launch_agents_dir / f"{_LAUNCHD_LABEL}.plist"
+    try:
+        launch_agents_dir.mkdir(parents=True, exist_ok=True)
+        plist_path.write_text(
+            _autostart_plist(repo_root, Path.home()))
+    except OSError as exc:
+        print(f"FIX Could not write {plist_path}: {exc}", file=stdout)
+        return False
+    domain = f"gui/{getuid()}"
+    _invoke(["launchctl", "bootout", domain, str(plist_path)], run)
+    booted = _invoke(
+        ["launchctl", "bootstrap", domain, str(plist_path)], run)
+    if not _command_ok(booted, ["launchctl"]):
+        print("FIX launchctl bootstrap failed — start manually with "
+              "python3 tools/tokenserver/tokenserver.py", file=stdout)
+        return False
+    _invoke(["launchctl", "kickstart", "-k",
+             f"{domain}/{_LAUNCHD_LABEL}"], run)
+    print(f"PASS Tokenserver runs at login ({plist_path})", file=stdout)
+    return True
+
+
+def _server_alive(urlopen) -> dict | None:
+    try:
+        request = urllib.request.Request(
+            TOKEN_SERVER_URL, headers={"Accept": "application/json"})
+        open_url = (_default_urlopen if urlopen is _AUTO else urlopen)
+        with open_url(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
+            payload = json.loads(
+                response.read(MAX_DIAGNOSTIC_BYTES).decode("utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _wizard_watch(*, path: Path, providers: str, detail: bool | None,
+                  autostart: bool | None, repo_root: Path,
+                  python: Path | None, codex: Path | None,
+                  claude_settings_path: Path, launch_agents_dir: Path,
+                  run, urlopen, input_fn, interactive: bool,
+                  stdout) -> int:
+    """Everything the computer needs for the watch, one guided pass."""
+    print("VibePulse watch setup — each step is safe to re-run.",
+          file=stdout)
+    if python is None:
+        print("FIX Python executable not found", file=stdout)
+        return 1
+    if detail is None:
+        detail = (_interactive_detail(input_fn) if interactive else False)
+    if not _install_transaction(
+            path=path, providers=providers, detail=detail,
+            legacy_claude_panel_v1=False, repo_root=repo_root,
+            python=python, codex=codex if providers in ("codex", "both")
+            else codex, run=run, stdout=stdout):
+        return 1
+    print(f"PASS Providers saved: {providers}, detail "
+          f"{'on' if detail else 'off'}", file=stdout)
+    if providers in ("claude", "both"):
+        if not _merge_claude_hooks(claude_settings_path, stdout=stdout):
+            return 1
+    if autostart is None and interactive:
+        choice = input_fn(
+            "Start the tokenserver automatically at login? [Y/n]: ")
+        autostart = choice.strip().lower() in ("", "y", "yes")
+    if autostart:
+        if not _install_autostart(
+                repo_root, launch_agents_dir=launch_agents_dir, run=run,
+                stdout=stdout):
+            return 1
+    alive = _server_alive(urlopen)
+    if alive is None:
+        print("OFF Tokenserver is not reachable yet — start it "
+              "(or let autostart do it), then run:  "
+              "python3 tools/vibepulse_setup.py pair", file=stdout)
+        return 0
+    probe = alive.get("claudeProbe", "unknown")
+    print(f"PASS Tokenserver reachable — claudeProbe: {probe}", file=stdout)
+    served = alive.get("interactions", {})
+    if (served.get("claude") != (providers in ("claude", "both")) or
+            served.get("detail") != detail):
+        print("OFF The running tokenserver still serves old choices — "
+              "restart it, then run:  python3 tools/vibepulse_setup.py pair",
+              file=stdout)
+        return 0
+    print("Next: on the watch, open the gear -> Pairing and enter this code:",
+          file=stdout)
+    return 0 if _pair(stdout=stdout, urlopen=(
+        _default_urlopen if urlopen is _AUTO else urlopen)) else 1
+
+
+def _pair(*, stdout, urlopen=urllib.request.urlopen) -> bool:
+    """Arm one-shot pairing on the running tokenserver and show the code.
+
+    Creates ~/.vibepulse-device-key first if this computer has none yet, so
+    pairing is also the zero-to-key path for brand-new setups.
+    """
+    key_path = Path.home() / ".vibepulse-device-key"
+    if not key_path.exists():
+        key_path.write_text(secrets.token_hex(32) + "\n")
+        key_path.chmod(0o600)
+        print("PASS Created ~/.vibepulse-device-key (chmod 600)", file=stdout)
+    try:
+        request = urllib.request.Request(
+            TOKEN_SERVER_URL.rstrip("/") + "/api/pair/arm", data=b"{}",
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
+            armed = json.loads(
+                response.read(MAX_DIAGNOSTIC_BYTES).decode("utf-8"))
+    except Exception:
+        print("FIX The tokenserver is not reachable on 127.0.0.1:8737 — "
+              "start it first:\n    python3 tools/tokenserver/tokenserver.py",
+              file=stdout)
+        return False
+    code = armed.get("code")
+    if not (isinstance(code, str) and code.isdigit() and len(code) == 6):
+        print("FIX The tokenserver refused to arm pairing: "
+              f"{armed.get('reason', 'unexpected reply')}", file=stdout)
+        return False
+    print("", file=stdout)
+    print(f"    Pairing code:  {code[:3]} {code[3:]}", file=stdout)
+    print("", file=stdout)
+    print(f"Enter it in the app within {armed.get('expires_in_s', 60)} "
+          "seconds. One use only; run this command again for a new code.",
+          file=stdout)
+    return True
+
+
 def _print_status(config: VibePulseConfig, stdout) -> None:
     def switch(value: bool) -> str:
         return "ON" if value else "OFF"
@@ -1678,8 +1934,13 @@ def _failed_step_with_publish_state(
 def _install_transaction(
         *, path: Path, providers: str, detail: bool,
         legacy_claude_panel_v1: bool, repo_root: Path,
-        python: Path, codex: Path, run, stdout) -> bool:
-    """Mutate owned Codex resources and publish routing transactionally."""
+        python: Path, codex: Path | None, run, stdout) -> bool:
+    """Mutate owned Codex resources and publish routing transactionally.
+
+    Without a Codex CLI on the machine, a Claude-only (or off) install is
+    still valid: there is no Codex package to manage, so only the routing
+    configuration is published. Codex providers still hard-require the CLI.
+    """
     with config_lock(_setup_transaction_path(path)):
         with config_lock(path):
             snapshot = load_config(path)
@@ -1692,6 +1953,10 @@ def _install_transaction(
                 print("FIX Python executable: install Python 3.11 or newer",
                       file=stdout)
                 return False
+            if codex is None:
+                failed_step = "configuration publish"
+                _publish_config(path, snapshot, target)
+                return True
             if not _codex_probe_ok(codex, run):
                 print("FIX Codex executable: candidate is not Codex",
                       file=stdout)
@@ -1811,6 +2076,8 @@ def main(
         relay_token_path: Path | None = None,
         secrets_path: Path | None = None,
         interaction_relay_dir: Path | None = None,
+        claude_settings_path: Path | None = None,
+        launch_agents_dir: Path | None = None,
         token_urlsafe=secrets.token_urlsafe) -> int:
     """Run the strict CLI with injectable process and network boundaries."""
     args = _parser().parse_args(argv)
@@ -1881,6 +2148,25 @@ def main(
                 service_dir=relay_service, run=run,
                 stdout=output) else 1
 
+        if args.command == "watch":
+            return _wizard_watch(
+                path=path, providers=args.providers, detail=args.detail,
+                autostart=args.autostart, repo_root=Path(repo_root),
+                python=python_path, codex=codex_path,
+                claude_settings_path=(
+                    Path.home() / ".claude" / "settings.json"
+                    if claude_settings_path is None
+                    else Path(claude_settings_path)),
+                launch_agents_dir=(
+                    Path.home() / "Library" / "LaunchAgents"
+                    if launch_agents_dir is None
+                    else Path(launch_agents_dir)),
+                run=run, urlopen=urlopen, input_fn=input_fn,
+                interactive=interactive, stdout=output)
+
+        if args.command == "pair":
+            return 0 if _pair(stdout=output) else 1
+
         if args.command == "status":
             _print_status(load_config(path), output)
             return 0
@@ -1899,9 +2185,15 @@ def main(
             return 0
 
         if args.command == "uninstall":
-            if codex_path is None or python_path is None:
-                print("FIX Python or Codex executable not found", file=output)
+            if python_path is None:
+                print("FIX Python executable not found", file=output)
                 return 1
+            if codex_path is None:
+                _disable(path, "codex")
+                print("PASS Disabled Codex interactions (no Codex CLI found, "
+                      "so there is no external registration to remove)",
+                      file=output)
+                return 0
             if not _uninstall_transaction(
                     path=path, repo_root=Path(repo_root), python=python_path,
                     codex=codex_path, run=run, stdout=output):
@@ -1922,8 +2214,12 @@ def main(
             print("FIX --legacy-claude-panel-v1 requires Claude in "
                   "--providers", file=output)
             return 1
-        if codex_path is None or python_path is None:
-            print("FIX Python or Codex executable not found", file=output)
+        if python_path is None:
+            print("FIX Python executable not found", file=output)
+            return 1
+        if codex_path is None and providers in ("codex", "both"):
+            print("FIX Codex executable not found — required for "
+                  "--providers codex/both", file=output)
             return 1
         if not _install_transaction(
                 path=path, providers=providers, detail=detail,
@@ -1931,6 +2227,10 @@ def main(
                 repo_root=Path(repo_root), python=python_path,
                 codex=codex_path, run=run, stdout=output):
             return 1
+        if codex_path is None:
+            print("PASS Saved provider choices (no Codex CLI found, so no "
+                  "Codex package was installed)", file=output)
+            return 0
         print("PASS Installed the local VibePulse package", file=output)
         print("Review and trust the exact VibePulse commands in Codex /hooks.",
               file=output)
