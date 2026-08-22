@@ -20,3 +20,6 @@ sdkconfig.old
 platform/fonts/src/
 # Enhetens LAN-IP for tools/ota-flash.sh — miljospecifik, aldrig delad.
 .ota-device
+watch/AgentTap/Config/DeviceKey.generated.swift
+watch/*.xcodeproj
+watch/build/

@@ -18,6 +18,8 @@ default-off encrypted interaction relay can carry supported Needs You
 decisions without requiring the panel and computer to share a LAN. A third,
 independent **Live agent status relay** can keep the Claude/Codex activity rows
 current across ordinary internet WiFi. Every cloud feature is off by default.
+The same service now also feeds **AgentTap**, a native Apple Watch app — quota on a
+watch face complication and Needs You answered from your wrist ([details](#on-your-wrist)).
 
 ## The problem
 
@@ -264,6 +266,31 @@ Rates are not hand-maintained: they are generated from a public price
 catalogue by `tools/tokenserver/update_prices.py` and committed, so the
 server stays offline and refreshing is one command. An unknown model degrades
 the figure to a dash rather than being silently free.
+
+## On your wrist
+
+The tokenserver speaks plain JSON on your LAN, so the panel doesn't have to be
+the only client. `watch/` contains **AgentTap**, a native watchOS app — same endpoints, same
+v2 signed-verdict protocol, same shared device key as the panel:
+
+<table>
+<tr>
+<td width="33%"><img src="docs/img/watch/glance.png" alt="Quota glance: Claude session, week and model-week rings, Codex dashed" width="100%"></td>
+<td width="33%"><img src="docs/img/watch/needs-you.png" alt="A real Claude Code question answered from the watch" width="100%"></td>
+<td width="33%"><img src="docs/img/watch/agents.png" alt="Live agent activity rows on the watch" width="100%"></td>
+</tr>
+<tr>
+<td><b>Glance</b> — the four quota rings with reset countdowns; missing data is dashes, stale data says so.</td>
+<td><b>Needs You</b> — the full decision card: countdown, APPROVE only when the server's safe-tier allows it, DENY, LEAVE IT. A long-press is the panic deny-all.</td>
+<td><b>Agents</b> — the live Claude/Codex rows, ranked exactly like the panel.</td>
+</tr>
+</table>
+
+Build and sideload with Xcode — see [watch/README.md](watch/README.md). Honest
+limitation: watchOS budgets background wakeups, so answering from the wrist is
+a foreground feature (open app, 1 Hz poll); the complication carries quota and
+wears its staleness openly. The terminal fallback always stands, and the watch
+and panel can coexist — first valid answer wins, the other clears.
 
 ## How it works
 

@@ -1,0 +1,110 @@
+name: AgentTap
+options:
+  bundleIdPrefix: com.jgselva
+  deploymentTarget:
+    watchOS: "10.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: A37FBNJK6T
+    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "1.0.0"
+targets:
+  AgentTapContainer:
+    type: application.watchapp2-container
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - Container
+    info:
+      path: Container/Info.plist
+      properties:
+        CFBundleDisplayName: AgentTap
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jgselva.agenttap
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SKIP_INSTALL: "NO"
+        INSTALL_PATH: /Applications
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - target: AgentTap
+  AgentTap:
+    type: application
+    platform: watchOS
+    sources:
+      - AgentTap
+    info:
+      path: AgentTap/Info.plist
+      properties:
+        CFBundleDisplayName: AgentTap
+        WKApplication: true
+        WKWatchOnly: true
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: >-
+          AgentTap polls your VibePulse tokenserver on the local network.
+        NSBonjourServices:
+          - _vibepulse._tcp
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jgselva.agenttap.watchkitapp
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SKIP_INSTALL: "YES"
+    dependencies:
+      - target: AgentTapWidgets
+  AgentTapWidgets:
+    type: app-extension
+    platform: watchOS
+    preBuildScripts:
+      - script: "\"$PROJECT_DIR\"/tools/gen-device-key.sh"
+        name: Generate device key
+        outputFiles:
+          - $(PROJECT_DIR)/AgentTap/Config/DeviceKey.generated.swift
+    sources:
+      - AgentTapWidgets
+      - AgentTap/Config/DeviceKey.generated.swift
+      - AgentTap/Core/TokensClient.swift
+    info:
+      path: AgentTapWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: AgentTap
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jgselva.agenttap.watchkitapp.widgets
+  AgentTapTests:
+    type: bundle.unit-test
+    platform: watchOS
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+    sources:
+      - AgentTapTests
+      - AgentTap/Core
+schemes:
+  AgentTapStore:
+    build:
+      targets:
+        AgentTapContainer: all
+    run:
+      config: Debug
+  AgentTap:
+    build:
+      targets:
+        AgentTap: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AgentTapTests
