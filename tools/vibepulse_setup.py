@@ -152,13 +152,17 @@ def _parser() -> argparse.ArgumentParser:
     push = commands.add_parser(
         "push", help="enable Needs You push notifications to the watch "
         "using an APNs auth key (.p8)")
-    push.add_argument("--key", required=True,
-                      help="path to the AuthKey_XXXXXXXXXX.p8 file")
+    push.add_argument("--key", default=None,
+                      help="path to the AuthKey_XXXXXXXXXX.p8 file "
+                      "(developer's direct mode)")
+    push.add_argument("--relay-url", default=None,
+                      help="developer-hosted push relay URL "
+                      "(no key needed — the normal user mode)")
     push.add_argument("--key-id", default=None,
                       help="APNs Key ID (defaults to the XXXXXXXXXX part "
                       "of the filename)")
-    push.add_argument("--team-id", required=True,
-                      help="Apple Developer Team ID")
+    push.add_argument("--team-id", default=None,
+                      help="Apple Developer Team ID (direct mode)")
     push.add_argument("--topic", default="com.jgselva.agenttap.watchkitapp",
                       help="watch app bundle id")
 
@@ -2162,6 +2166,32 @@ def main(
                 stdout=output) else 1
 
         if args.command == "push":
+            state = (Path(os.environ["LOCALAPPDATA"]) / "VibePulse"
+                     if sys.platform == "win32" and
+                     os.environ.get("LOCALAPPDATA")
+                     else Path.home() / "Library" / "Application Support" /
+                     "VibePulse")
+            if args.relay_url:
+                if args.key:
+                    print("FIX Pass either --key or --relay-url, not both",
+                          file=output)
+                    return 1
+                if not args.relay_url.startswith("https://"):
+                    print("FIX --relay-url must be https", file=output)
+                    return 1
+                state.mkdir(parents=True, exist_ok=True)
+                (state / "apns.json").write_text(json.dumps(
+                    {"relay_url": args.relay_url}, indent=2))
+                print("PASS Push relay configured. Restart the tokenserver, "
+                      "then open AgentTap once on the watch.", file=output)
+                return 0
+            if args.key is None:
+                print("FIX Pass --key (your APNs .p8) or --relay-url",
+                      file=output)
+                return 1
+            if not args.team_id:
+                print("FIX --team-id is required with --key", file=output)
+                return 1
             key_file = Path(args.key).expanduser()
             if not key_file.exists():
                 print(f"FIX APNs key not found: {key_file}", file=output)
@@ -2179,11 +2209,6 @@ def main(
             if key_file != safe_key:
                 safe_key.write_bytes(key_file.read_bytes())
                 safe_key.chmod(0o600)
-            state = (Path(os.environ["LOCALAPPDATA"]) / "VibePulse"
-                     if sys.platform == "win32" and
-                     os.environ.get("LOCALAPPDATA")
-                     else Path.home() / "Library" / "Application Support" /
-                     "VibePulse")
             state.mkdir(parents=True, exist_ok=True)
             (state / "apns.json").write_text(json.dumps({
                 "key_path": str(safe_key), "key_id": key_id,

@@ -1,0 +1,6 @@
+name = "agenttap-push-relay"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+
+[vars]
+APNS_TOPIC = "com.jgselva.agenttap.watchkitapp"

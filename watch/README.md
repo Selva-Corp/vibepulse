@@ -88,8 +88,27 @@ doesn't.)
   and a scripted decision, no computer needed. Try the app before setting
   anything up.
 
-**Honest limitation:** watchOS budgets background wakeups, so answering is a
-foreground feature — the app polls at 1 Hz while open. A 120-second decision
+## Push notifications (the buzz, anywhere)
+
+The tokenserver rings your wrist through APNs the moment a prompt parks —
+on any network, cellular included. One command:
+
+```sh
+python3 tools/vibepulse_setup.py push --relay-url https://agenttap-push-relay.jgselva2012.workers.dev
+```
+
+That routes through the developer-hosted relay, which holds the APNs key
+and can see nothing else: requests carry only your device token, and the
+notification body is a fixed generic string — prompt text never leaves
+your LAN. (Developers with their own APNs key can use
+`push --key AuthKey.p8 --team-id TEAM` for direct delivery instead; the
+relay's own source and deploy steps live in `tools/push-relay/`.) Restart
+the tokenserver, open AgentTap once so it registers, done. Tapping the
+notification opens the verified decision card — approving still happens
+only against the digest-bound screen, never blind from a banner.
+
+**Honest limitation:** watchOS budgets background wakeups, so *live
+answering* is a foreground feature — the app polls at 1 Hz while open. A 120-second decision
 window cannot be reliably caught in the background without push
 infrastructure. The terminal fallback always stands, and the watch and the
 AMOLED panel coexist: first valid answer wins, the other clears.

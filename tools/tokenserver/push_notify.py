@@ -49,6 +49,8 @@ class ApnsConfig:
     def load(cls, path: Path) -> Optional["ApnsConfig"]:
         try:
             raw = json.loads(path.read_text())
+            if "relay_url" in raw:
+                return None  # relay mode — see RelaySender.load
             cfg = cls(raw["key_path"], raw["key_id"], raw["team_id"],
                       raw["topic"])
             if not Path(cfg.key_path).exists():
@@ -56,6 +58,77 @@ class ApnsConfig:
             return cfg
         except (OSError, ValueError, KeyError):
             return None
+
+
+class RelaySender:
+    """Push via the developer-hosted relay: sends ONLY the token, over
+    plain stdlib HTTPS. The relay composes a fixed generic alert, so no
+    content can leak by construction."""
+
+    def __init__(self, relay_url: str, state_dir: Path, log=None,
+                 urlopen=None) -> None:
+        self.relay_url = relay_url.rstrip("/")
+        self.state_path = state_dir / "push-tokens.json"
+        self._log = log
+        self._urlopen = urlopen
+        self._lock = threading.Lock()
+
+    @classmethod
+    def load(cls, path: Path, state_dir: Path, log=None
+             ) -> Optional["RelaySender"]:
+        try:
+            raw = json.loads(path.read_text())
+            url = raw.get("relay_url")
+            if not (isinstance(url, str) and url.startswith("https://")):
+                return None
+            return cls(url, state_dir, log=log)
+        except (OSError, ValueError):
+            return None
+
+    def register(self, token: str) -> None:
+        with self._lock:
+            try:
+                tokens = json.loads(self.state_path.read_text())
+                if not isinstance(tokens, list):
+                    tokens = []
+            except (OSError, ValueError):
+                tokens = []
+            tokens = [t for t in tokens if t.get("token") != token]
+            tokens.append({"token": token, "at": int(time.time())})
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            self.state_path.write_text(json.dumps(tokens[-MAX_TOKENS:]))
+
+    def notify(self, *, title: str, body: str, hold_s: int) -> None:
+        # title/body deliberately unused: the relay's alert is fixed.
+        threading.Thread(target=self._notify_sync, daemon=True).start()
+
+    def _notify_sync(self) -> None:
+        import urllib.request
+        open_url = self._urlopen or urllib.request.urlopen
+        with self._lock:
+            try:
+                tokens = json.loads(self.state_path.read_text())
+            except (OSError, ValueError):
+                tokens = []
+        for entry in tokens if isinstance(tokens, list) else []:
+            token = entry.get("token")
+            if not isinstance(token, str):
+                continue
+            req = urllib.request.Request(
+                self.relay_url + "/nudge",
+                data=json.dumps({"token": token}).encode(),
+                headers={"Content-Type": "application/json",
+                         "User-Agent": "vibepulse-tokenserver"})
+            try:
+                with open_url(req, timeout=CURL_TIMEOUT_S) as resp:
+                    ok = getattr(resp, "status", 0) == 200
+            except Exception:
+                ok = False
+            if self._log:
+                if ok:
+                    self._log.info("APNs-relä: Needs You-puff levererad")
+                else:
+                    self._log.warning("APNs-relä: leverans misslyckades")
 
 
 class ApnsSender:

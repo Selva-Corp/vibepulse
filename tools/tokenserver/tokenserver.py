@@ -102,7 +102,7 @@ else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     from github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
     from interactions import InteractionStore
     from pairing import PairingGate
-    from push_notify import ApnsConfig, ApnsSender
+    from push_notify import ApnsConfig, ApnsSender, RelaySender
     from max_tracker import MaxTrackerStore
     from publisher import Publisher
     from quota_cache import CachedQuota, QuotaCache
@@ -3235,6 +3235,13 @@ def main():
     elif apns_config is not None:
         log.warning("APNs-nyckel finns men `cryptography` saknas — "
                     "puffar avstängda")
+    else:
+        relay_sender = RelaySender.load(
+            _state_dir() / "apns.json", _state_dir(), log=log)
+        if relay_sender is not None:
+            Handler.apns_sender = relay_sender
+            log.info("APNs-puffar aktiva via relä %s",
+                     relay_sender.relay_url)
     _advertise_bonjour(args.port)
     secret = _configure_interactions(
         interaction_config, args.interaction_timeout,

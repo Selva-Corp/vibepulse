@@ -284,6 +284,7 @@ cc -std=c11 -Wall -Wextra -Werror -O1 \
 "$PYTHON_BIN" test_pairing.py
 "$PYTHON_BIN" test_vibepulse_setup_watch.py
 "$PYTHON_BIN" test_push_notify.py
+"$PYTHON_BIN" test_push_relay_js_wiring.py
 "$PYTHON_BIN" test_interaction_relay_build.py
 "$PYTHON_BIN" test_interaction_relay_net_source.py
 "$PYTHON_BIN" test_vibepulse_codex_plugin.py

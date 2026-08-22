@@ -10,7 +10,8 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]
                        / "tools" / "tokenserver"))
-from push_notify import ApnsConfig, ApnsSender, PROD_HOST, SANDBOX_HOST  # noqa: E402
+from push_notify import (ApnsConfig, ApnsSender, RelaySender,  # noqa: E402
+                         PROD_HOST, SANDBOX_HOST)
 
 KEY = "ab" * 32
 TOKEN = "cd" * 32
@@ -125,3 +126,38 @@ class DeliveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RelaySenderTests(unittest.TestCase):
+    def test_sends_only_the_token_and_nothing_else(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            requests = []
+
+            class Resp:
+                status = 200
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+
+            def fake_urlopen(req, timeout=None):
+                requests.append((req.full_url, req.data))
+                return Resp()
+
+            sender = RelaySender("https://relay.example",
+                                 pathlib.Path(tmp), urlopen=fake_urlopen)
+            sender.register(TOKEN)
+            sender._notify_sync()
+            self.assertEqual(len(requests), 1)
+            url, data = requests[0]
+            self.assertEqual(url, "https://relay.example/nudge")
+            self.assertEqual(json.loads(data), {"token": TOKEN})
+
+    def test_relay_config_loads_and_direct_config_refuses_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = pathlib.Path(tmp) / "apns.json"
+            cfg.write_text(json.dumps({"relay_url": "https://r.example"}))
+            self.assertIsNone(ApnsConfig.load(cfg))
+            sender = RelaySender.load(cfg, pathlib.Path(tmp))
+            self.assertIsNotNone(sender)
+            self.assertEqual(sender.relay_url, "https://r.example")
+            cfg.write_text(json.dumps({"relay_url": "http://insecure"}))
+            self.assertIsNone(RelaySender.load(cfg, pathlib.Path(tmp)))
