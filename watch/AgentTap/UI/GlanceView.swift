@@ -10,6 +10,11 @@ struct GlanceView: View {
                 Label("Mac unreachable", systemImage: "wifi.slash")
                     .font(.footnote)
                     .foregroundStyle(Theme.muted)
+                if let err = model.netError {
+                    Text(err)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Theme.muted)
+                }
                 Button("Try demo mode") { model.demoMode = true }
                     .font(.footnote)
                     .buttonStyle(.bordered)

@@ -99,6 +99,7 @@ AMOLED panel coexist: first valid answer wins, the other clears.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Rings all dashes, "Mac unreachable" | Wrong server, Mac asleep, different WiFi | Tap your Mac's name under Settings → Server, or enter a raw IP; check `curl localhost:8737/` on the Mac |
+| "Mac unreachable" with `-1001 timedOut` on a physical watch | watchOS often hangs resolving `.local` hostnames | Enter the Mac's raw IP under Settings → Server (`ip:8737` is enough — the scheme is added). Give the Mac a DHCP reservation in your router so the IP holds |
 | Your Mac never appears in Server list | mDNS blocked, or zeroconf not installed on the Mac | Type the address once — discovery is a convenience, not a requirement |
 | Rings show but Codex dashed | No Codex source on the Mac | Normal — the halves are independent |
 | Card appears but no APPROVE | Detail off, item outside the safe tier, or unpaired | Re-run the `watch` wizard (choose detail), pair; some items are terminal-only by design |

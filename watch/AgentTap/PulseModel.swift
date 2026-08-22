@@ -15,6 +15,7 @@ final class PulseModel: ObservableObject {
     @Published var presented: Pending?
     @Published var lastAnswer: AnswerResult?
     @Published var reachable = true
+    @Published var netError: String?
 
     private var client: VibePulseClient
     // Runtime pairing (keychain) wins over a key baked in at build time.
@@ -25,8 +26,9 @@ final class PulseModel: ObservableObject {
     var serverBase: String {
         get { storedBase.isEmpty ? GeneratedDefaults.serverBase : storedBase }
         set {
-            storedBase = newValue
-            client = VibePulseClient(base: newValue)
+            let cleaned = VibePulseClient.normalize(newValue)
+            storedBase = cleaned
+            client = VibePulseClient(base: cleaned)
         }
     }
     var canAnswer: Bool { demoMode || signer.hasKey }
@@ -89,6 +91,7 @@ final class PulseModel: ObservableObject {
                     self.apply(status)
                 } else {
                     self.reachable = false
+                    self.netError = self.client.lastError
                 }
                 if Date().timeIntervalSince(lastTokens) >= 30 {
                     if let snap = await self.client.fetchTokens() {

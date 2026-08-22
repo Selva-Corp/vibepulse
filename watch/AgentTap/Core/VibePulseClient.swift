@@ -10,9 +10,18 @@ struct AnswerResult {
 final class VibePulseClient {
     var baseURL: URL
     private let session: URLSession
+    /// Last transport failure, for the glance diagnostic line.
+    private(set) var lastError: String?
+
+    static func normalize(_ base: String) -> String {
+        var s = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !s.isEmpty && !s.contains("://") { s = "http://" + s }
+        return s
+    }
 
     init(base: String) {
-        self.baseURL = URL(string: base) ?? URL(string: "http://localhost:8737")!
+        self.baseURL = URL(string: VibePulseClient.normalize(base))
+            ?? URL(string: "http://localhost:8737")!
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = 2.5
         cfg.timeoutIntervalForResource = 5
@@ -28,10 +37,22 @@ final class VibePulseClient {
     }
 
     func fetchAgentStatus() async -> AgentStatus? {
-        guard let (data, resp) = try? await session.data(
-                from: baseURL.appendingPathComponent("api/agent-status")),
-              (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return AgentStatus.parse(data)
+        do {
+            let (data, resp) = try await session.data(
+                from: baseURL.appendingPathComponent("api/agent-status"))
+            guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
+                lastError = "http \((resp as? HTTPURLResponse)?.statusCode ?? 0)"
+                return nil
+            }
+            lastError = nil
+            return AgentStatus.parse(data)
+        } catch {
+            let u = error as? URLError
+            lastError = "\(u?.code.rawValue ?? (error as NSError).code) "
+                + (u.map { String(describing: $0.code) }
+                   ?? (error as NSError).domain)
+            return nil
+        }
     }
 
     /// Signs against the RECOMPUTED digest — never the published one — so the
