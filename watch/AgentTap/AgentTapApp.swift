@@ -1,7 +1,10 @@
 import SwiftUI
+import WatchKit
 
 @main
 struct AgentTapApp: App {
+    @WKApplicationDelegateAdaptor(PushRegistrar.self)
+    private var pushRegistrar
     @StateObject private var model = PulseModel()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -31,6 +34,10 @@ struct AgentTapApp: App {
         }
         .onChange(of: scenePhase) { _, phase in
             model.setActive(phase == .active)
+            if phase == .active {
+                pushRegistrar.serverBase = { model.serverBase }
+                pushRegistrar.deviceKey = { model.signingKeyHex }
+            }
         }
     }
 }

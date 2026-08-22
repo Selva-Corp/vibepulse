@@ -32,6 +32,7 @@ final class PulseModel: ObservableObject {
         }
     }
     var canAnswer: Bool { demoMode || signer.hasKey }
+    var signingKeyHex: String { KeyStore.load() ?? DeviceKey.hex }
     var pairedViaCode: Bool { KeyStore.load() != nil }
 
     /// Redeem a pairing code; on success the key lands in the keychain and

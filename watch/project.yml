@@ -56,6 +56,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jgselva.agenttap.watchkitapp
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: AgentTap/AgentTap.entitlements
         SKIP_INSTALL: "YES"
     dependencies:
       - target: AgentTapWidgets

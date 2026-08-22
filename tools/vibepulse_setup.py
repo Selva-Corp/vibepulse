@@ -149,6 +149,19 @@ def _parser() -> argparse.ArgumentParser:
         help="enable or disable INSECURE compatibility for old Claude panel "
              "firmware; default off and never applies to Codex")
 
+    push = commands.add_parser(
+        "push", help="enable Needs You push notifications to the watch "
+        "using an APNs auth key (.p8)")
+    push.add_argument("--key", required=True,
+                      help="path to the AuthKey_XXXXXXXXXX.p8 file")
+    push.add_argument("--key-id", default=None,
+                      help="APNs Key ID (defaults to the XXXXXXXXXX part "
+                      "of the filename)")
+    push.add_argument("--team-id", required=True,
+                      help="Apple Developer Team ID")
+    push.add_argument("--topic", default="com.jgselva.agenttap.watchkitapp",
+                      help="watch app bundle id")
+
     watch = commands.add_parser(
         "watch", help="guided setup for the Apple Watch app: providers, "
         "Claude Code hooks, autostart, pairing")
@@ -2147,6 +2160,39 @@ def main(
                 token_path=relay_token, secrets_path=secrets_header,
                 service_dir=relay_service, run=run,
                 stdout=output) else 1
+
+        if args.command == "push":
+            key_file = Path(args.key).expanduser()
+            if not key_file.exists():
+                print(f"FIX APNs key not found: {key_file}", file=output)
+                return 1
+            key_id = args.key_id
+            if key_id is None:
+                stem = key_file.stem
+                key_id = stem[len("AuthKey_"):] if \
+                    stem.startswith("AuthKey_") else ""
+            if not re.fullmatch(r"[A-Z0-9]{10}", key_id or ""):
+                print("FIX Could not derive the 10-character Key ID from "
+                      "the filename — pass --key-id", file=output)
+                return 1
+            safe_key = Path.home() / f".vibepulse-apns-{key_id}.p8"
+            if key_file != safe_key:
+                safe_key.write_bytes(key_file.read_bytes())
+                safe_key.chmod(0o600)
+            state = (Path(os.environ["LOCALAPPDATA"]) / "VibePulse"
+                     if sys.platform == "win32" and
+                     os.environ.get("LOCALAPPDATA")
+                     else Path.home() / "Library" / "Application Support" /
+                     "VibePulse")
+            state.mkdir(parents=True, exist_ok=True)
+            (state / "apns.json").write_text(json.dumps({
+                "key_path": str(safe_key), "key_id": key_id,
+                "team_id": args.team_id, "topic": args.topic}, indent=2))
+            print(f"PASS APNs configured (key {key_id}, team "
+                  f"{args.team_id}). Restart the tokenserver, then open "
+                  "AgentTap once on the watch so it registers for push.",
+                  file=output)
+            return 0
 
         if args.command == "watch":
             return _wizard_watch(

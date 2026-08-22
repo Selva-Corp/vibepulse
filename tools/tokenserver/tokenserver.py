@@ -102,6 +102,7 @@ else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     from github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
     from interactions import InteractionStore
     from pairing import PairingGate
+    from push_notify import ApnsConfig, ApnsSender
     from max_tracker import MaxTrackerStore
     from publisher import Publisher
     from quota_cache import CachedQuota, QuotaCache
@@ -2093,6 +2094,7 @@ class Handler(BaseHTTPRequestHandler):
     plans = {"claude": None, "codex": None}  # sätts i main från --*-plan
     interaction_store = None  # "Needs You", av som standard; sätts i main
     pairing_gate = None  # 6-siffrig parning; sätts i main
+    apns_sender = None  # Needs You-puffar; sätts i main när nyckel finns
     interaction_timeout_s = 120.0  # sätts i main från --interaction-timeout
     claude_interactions = False
     codex_interactions = False
@@ -2335,6 +2337,18 @@ class Handler(BaseHTTPRequestHandler):
             # perfectly good place to answer this one.
             self._send_no_decision()
             return
+        if self.apns_sender is not None:
+            # Wake the wrist. Body honors the detail setting: without it the
+            # push says only that something waits, and in which project.
+            from agent_status import sanitize_project
+            project = sanitize_project(event.get("cwd") or "") or "agent"
+            if self.interaction_detail:
+                push_body = f"{project} · {'question' if kind == 'question' else 'approval'}"
+            else:
+                push_body = project
+            self.apns_sender.notify(
+                title="Needs You", body=push_body,
+                hold_s=int(self.interaction_timeout_s))
         try:
             body = self.interaction_store.await_verdict(
                 entry, is_alive=lambda: not self._hook_client_gone())
@@ -2475,6 +2489,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"ok": True, "denied": denied})
 
     def do_POST(self):
+        if self.path == "/api/push/register":
+            self._handle_push_register()
+            return
         if self.path == "/api/pair/arm":
             self._handle_pair_arm()
             return
@@ -2528,6 +2545,29 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_panic()
         else:
             self._send(404, {"error": "not found"})
+
+    def _handle_push_register(self):
+        """A watch hands over its APNs token, proving key possession."""
+        if not self._has_json_content_type():
+            self._send(415, {"error": "application/json required"})
+            return
+        payload = self._read_json_body(limit=1024)
+        if not isinstance(payload, dict):
+            self._send(400, {"ok": False, "reason": "bad request"})
+            return
+        secret = interactions.read_device_key() or ""
+        token = ApnsSender.verify_registration(secret, payload)
+        if token is None:
+            log.warning("push-registrering från %s avvisad",
+                        self.address_string())
+            self._send(403, {"ok": False, "reason": "signature rejected"})
+            return
+        if self.apns_sender is None:
+            self._send(200, {"ok": True, "push": "unconfigured"})
+            return
+        self.apns_sender.register(token)
+        log.info("push-token registrerad — Needs You når nu klockan")
+        self._send(200, {"ok": True, "push": "on"})
 
     def _handle_pair_arm(self):
         """Arm one 6-digit pairing code. Only this computer may arm."""
@@ -3187,6 +3227,14 @@ def main():
     Handler.plans = {"claude": args.claude_plan, "codex": args.codex_plan}
 
     Handler.pairing_gate = PairingGate(interactions.read_device_key)
+    apns_config = ApnsConfig.load(_state_dir() / "apns.json")
+    if apns_config is not None and ApnsSender.crypto_available():
+        Handler.apns_sender = ApnsSender(
+            apns_config, _state_dir(), log=log)
+        log.info("APNs-puffar aktiva (nyckel %s)", apns_config.key_id)
+    elif apns_config is not None:
+        log.warning("APNs-nyckel finns men `cryptography` saknas — "
+                    "puffar avstängda")
     _advertise_bonjour(args.port)
     secret = _configure_interactions(
         interaction_config, args.interaction_timeout,
