@@ -101,6 +101,7 @@ else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     from codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
     from interactions import InteractionStore
+    from pairing import PairingGate
     from max_tracker import MaxTrackerStore
     from publisher import Publisher
     from quota_cache import CachedQuota, QuotaCache
@@ -2091,6 +2092,7 @@ class Handler(BaseHTTPRequestHandler):
     github_monitor = None  # frivillig publik repo-monitor, sätts i main
     plans = {"claude": None, "codex": None}  # sätts i main från --*-plan
     interaction_store = None  # "Needs You", av som standard; sätts i main
+    pairing_gate = None  # 6-siffrig parning; sätts i main
     interaction_timeout_s = 120.0  # sätts i main från --interaction-timeout
     claude_interactions = False
     codex_interactions = False
@@ -2473,6 +2475,12 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"ok": True, "denied": denied})
 
     def do_POST(self):
+        if self.path == "/api/pair/arm":
+            self._handle_pair_arm()
+            return
+        if self.path == "/api/pair/claim":
+            self._handle_pair_claim()
+            return
         claude_route = self.path in (
             "/api/hook/question", "/api/hook/permission")
         codex_route = self.path in (
@@ -2520,6 +2528,50 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_panic()
         else:
             self._send(404, {"error": "not found"})
+
+    def _handle_pair_arm(self):
+        """Arm one 6-digit pairing code. Only this computer may arm."""
+        if self.pairing_gate is None:
+            self._send(404, {"error": "pairing is not available"})
+            return
+        if not self._is_loopback() or not self._has_valid_loopback_host() \
+                or self._header_values("Origin"):
+            log.warning("pair-arm från %s avvisad — parning armas bara "
+                        "från den här maskinen", self.address_string())
+            self._send(403, {"error": "pairing arms locally only"})
+            return
+        armed = self.pairing_gate.arm(time.time())
+        if armed is None:
+            self._send(409, {"ok": False,
+                             "reason": "no device key on this computer"})
+            return
+        log.info("parning armad: en engångskod gäller i %s s",
+                 armed["expires_in_s"])
+        self._send(200, {"ok": True, **armed})
+
+    def _handle_pair_claim(self):
+        """One guess from the LAN. The code proves presence at the computer."""
+        if self.pairing_gate is None:
+            self._send(404, {"error": "pairing is not available"})
+            return
+        if not self._has_json_content_type():
+            self._send(415, {"error": "application/json required"})
+            return
+        payload = self._read_json_body(limit=1024)
+        if not isinstance(payload, dict):
+            self._send(400, {"ok": False, "reason": "bad request"})
+            return
+        key, reason = self.pairing_gate.claim(payload.get("code"), time.time())
+        if key is None:
+            status = {"not armed": 404, "bad code": 403,
+                      "no key": 409}.get(reason, 400)
+            log.warning("parningsförsök från %s avvisat: %s",
+                        self.address_string(), reason)
+            self._send(status, {"ok": False, "reason": reason})
+            return
+        log.info("parning slutförd mot %s — koden är förbrukad",
+                 self.address_string())
+        self._send(200, {"ok": True, "device_key": key})
 
     def do_GET(self):
         if self.path == "/api/tokens":
@@ -2768,6 +2820,38 @@ def _resolve_interaction_config(args, path=None):
         elif invalid_saved:
             return VibePulseConfig()
         return resolved
+
+
+def _advertise_bonjour(port):
+    """Announce _vibepulse._tcp so clients can find us without typing.
+
+    Optional by design: the server's pure-stdlib contract holds — zeroconf is
+    used only if it happens to be installed (it ships in requirements-dev).
+    Failure of any kind downgrades silently to "type the address yourself".
+    """
+    try:
+        import socket as _socket
+        from zeroconf import ServiceInfo, Zeroconf
+        host = _socket.gethostname()
+        short = host[:-len(".local")] if host.endswith(".local") else host
+        addresses = []
+        try:
+            addresses.append(_socket.inet_aton(
+                _socket.gethostbyname(host)))
+        except OSError:
+            pass
+        info = ServiceInfo(
+            "_vibepulse._tcp.local.",
+            f"{short}._vibepulse._tcp.local.",
+            addresses=addresses or None,
+            port=int(port),
+            server=f"{short}.local.",
+            properties={"v": "1"})
+        Zeroconf().register_service(info)
+        log.info("annonserar _vibepulse._tcp via Bonjour som %s", short)
+    except Exception:
+        log.info("ingen Bonjour-annonsering (zeroconf saknas eller "
+                 "misslyckades) — klienter anger adressen själva")
 
 
 def _configure_interactions(config, interaction_timeout, audit=None):
@@ -3102,6 +3186,8 @@ def main():
     Handler.max_tracker_store = max_tracker_store
     Handler.plans = {"claude": args.claude_plan, "codex": args.codex_plan}
 
+    Handler.pairing_gate = PairingGate(interactions.read_device_key)
+    _advertise_bonjour(args.port)
     secret = _configure_interactions(
         interaction_config, args.interaction_timeout,
         audit=lambda action, row: log.info(
