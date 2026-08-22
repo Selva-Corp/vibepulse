@@ -94,7 +94,7 @@ The tokenserver rings your wrist through APNs the moment a prompt parks —
 on any network, cellular included. One command:
 
 ```sh
-python3 tools/vibepulse_setup.py push --relay-url https://agenttap-push-relay.jgselva2012.workers.dev
+python3 tools/vibepulse_setup.py push
 ```
 
 That routes through the developer-hosted relay, which holds the APNs key

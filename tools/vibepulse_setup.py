@@ -39,6 +39,8 @@ from tokenserver.vibepulse_config import (  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MARKETPLACE_NAME = "torget"
+DEFAULT_PUSH_RELAY = \
+    "https://agenttap-push-relay.jgselva2012.workers.dev"
 TOKEN_SERVER_URL = "http://127.0.0.1:8737/"
 MAX_DIAGNOSTIC_BYTES = 16 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 16 * 1024
@@ -2186,9 +2188,16 @@ def main(
                       "then open AgentTap once on the watch.", file=output)
                 return 0
             if args.key is None:
-                print("FIX Pass --key (your APNs .p8) or --relay-url",
-                      file=output)
-                return 1
+                # The zero-argument path IS the normal user path: the
+                # developer-hosted relay, which needs no key and can read
+                # nothing but a device token.
+                state.mkdir(parents=True, exist_ok=True)
+                (state / "apns.json").write_text(json.dumps(
+                    {"relay_url": DEFAULT_PUSH_RELAY}, indent=2))
+                print("PASS Push enabled via the AgentTap relay. Restart "
+                      "the tokenserver, then open AgentTap once on the "
+                      "watch.", file=output)
+                return 0
             if not args.team_id:
                 print("FIX --team-id is required with --key", file=output)
                 return 1
