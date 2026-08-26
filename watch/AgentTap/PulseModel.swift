@@ -2,6 +2,7 @@
 // Needs You presentation rules, answer/panic flow.
 import Foundation
 import SwiftUI
+import WatchKit
 import WidgetKit
 
 @MainActor
@@ -132,7 +133,7 @@ final class PulseModel: ObservableObject {
                 guard !Task.isCancelled, self.demoMode else { return }
                 let p = DemoData.pending()
                 if !self.answered.contains(p.requestID) {
-                    self.presented = p
+                    self.raise(p)
                 }
             }
             return
@@ -202,7 +203,7 @@ final class PulseModel: ObservableObject {
                 presented = pending
             } else if !answered.contains(pending.requestID),
                       pending.expiresInMS >= 3000 {
-                presented = pending
+                raise(pending)
             }
         } else if presented?.relayChallenge != nil {
             // Nothing pending relay-side anymore (answered elsewhere or
@@ -215,6 +216,16 @@ final class PulseModel: ObservableObject {
         } else {
             reachable = false
             viaRelay = false
+        }
+    }
+
+    /// Presenting the card IS the alert — give it the notification haptic
+    /// so a raised-but-unwatched wrist still feels the arrival.
+    private func raise(_ p: Pending) {
+        let isNew = presented?.requestID != p.requestID
+        presented = p
+        if isNew {
+            WKInterfaceDevice.current().play(.notification)
         }
     }
 
@@ -231,7 +242,7 @@ final class PulseModel: ObservableObject {
         if presented?.requestID == p.requestID {
             presented = p  // refresh countdown source
         } else if p.expiresInMS >= 3000 {
-            presented = p
+            raise(p)
         }
     }
 

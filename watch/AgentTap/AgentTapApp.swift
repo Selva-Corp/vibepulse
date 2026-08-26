@@ -34,10 +34,9 @@ struct AgentTapApp: App {
         }
         .onChange(of: scenePhase) { _, phase in
             model.setActive(phase == .active)
-            if phase == .active {
-                pushRegistrar.serverBase = { model.serverBase }
-                pushRegistrar.deviceKey = { model.signingKeyHex }
-            }
+            pushRegistrar.appIsActive = phase == .active
+            pushRegistrar.serverBase = { model.serverBase }
+            pushRegistrar.deviceKey = { model.signingKeyHex }
         }
     }
 }

@@ -2,7 +2,6 @@
 // files the Python and C implementations verify against.
 import CryptoKit
 import XCTest
-@testable import AgentTap
 
 final class RelayCryptoTests: XCTestCase {
     func vector(_ name: String) -> [String: Any] {

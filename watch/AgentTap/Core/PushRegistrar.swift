@@ -12,6 +12,10 @@ final class PushRegistrar: NSObject, WKApplicationDelegate,
     static let shared = PushRegistrar()
     var serverBase: (() -> String)?
     var deviceKey: (() -> String)?
+    /// True only while the app is on screen — watchOS keeps an app
+    /// "frontmost" for minutes after wrist-down, and willPresent is
+    /// consulted through that whole window.
+    var appIsActive = false
 
     func applicationDidFinishLaunching() {
         UNUserNotificationCenter.current().delegate = self
@@ -49,11 +53,13 @@ final class PushRegistrar: NSObject, WKApplicationDelegate,
         _ = try? await URLSession.shared.data(for: req)
     }
 
-    // Foreground: the live card is already the alert — stay quiet then.
+    // On screen: the full-screen card is the alert (with its own haptic) —
+    // a banner on top would be noise. Any other state — wrist down, watch
+    // face, another app, frontmost-but-dark — gets banner + sound (the buzz).
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
-        []
+        appIsActive ? [] : [.banner, .sound]
     }
 }
