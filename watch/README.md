@@ -47,16 +47,15 @@ Keep that code visible — it expires in 60 seconds (re-run
 
 ## Part 2 — The watch (≈1 minute)
 
-1. Open **AgentTap**. First launch shows **"Choose your computer"** with
-   your Mac already discovered — tap it. The quota rings light up right
-   there; viewing needs no pairing.
-2. Tap **Allow** on the notification prompt.
-3. Gear → **Pairing** → enter the 6 digits → **"Paired — answering is
-   on."**
+1. Open **AgentTap** and tap **Allow** on the notification prompt.
+2. Gear → **Pairing** → enter the 6 digits → **"Paired — answering is
+   on."** The rings light up on their own.
 
-That single code delivers everything the watch will ever need: the
-signing key, and (once Part 4 is done) your relay credentials. You never
-see or type any of them.
+The code does everything: it finds your computer's address by itself (the
+`pair` command parks it, encrypted, at a rendezvous only that code can
+open), then delivers the signing key and — once Part 4 is done — your
+relay credentials. You never see or type an address or a credential;
+six digits is the entire interface.
 
 **Working already:** rings, live agent rows, and full-screen decisions
 you answer from the wrist while on your home network.
@@ -118,7 +117,7 @@ stale). The watch:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "Choose your computer" shows nothing | Different WiFi, or mDNS blocked | Join the Mac's network; or type `THE-MACS-IP:8737` in Settings → Server |
+| Pairing says "unreachable" | Watch not on a network, or the code expired before the address rendezvous was read | Fresh code (`pair` again); make sure watch or its iPhone has any network |
 | Rings dashes at home, `-1001` under the label | `.local` lookup hang (physical watches) | Tap the discovered Mac row (stores a raw IP), or type the IP |
 | Pair says "No code is active" | The 60 s window passed | Run `pair` again, type the fresh code |
 | Buzz never arrives | Push not set up, or notification permission denied | Part 3; check watch Settings → Notifications → AgentTap |
