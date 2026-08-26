@@ -23,9 +23,10 @@ struct GlanceView: View {
                             .foregroundStyle(Theme.muted)
                     }
                 } else {
-                    Text("Choose your computer")
-                        .font(.footnote)
+                    Text("On your computer, run the setup — then enter the 6-digit code under Settings → Pairing. It connects everything.")
+                        .font(.system(size: 11))
                         .foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
                 }
                 ForEach(discovery.servers) { found in
                     Button {

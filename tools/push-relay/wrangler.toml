@@ -4,3 +4,10 @@ compatibility_date = "2026-08-01"
 
 [vars]
 APNS_TOPIC = "com.jgselva.agenttap.watchkitapp"
+
+[durable_objects]
+bindings = [{ name = "RENDEZVOUS", class_name = "Rendezvous" }]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Rendezvous"]

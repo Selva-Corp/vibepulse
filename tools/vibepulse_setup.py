@@ -1532,6 +1532,28 @@ def _pair(*, stdout, urlopen=urllib.request.urlopen) -> bool:
         print("FIX The tokenserver refused to arm pairing: "
               f"{armed.get('reason', 'unexpected reply')}", file=stdout)
         return False
+    try:
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "tokenserver"))
+        import pairing as _pairing
+        hosts = _pairing.local_addresses()
+        if hosts:
+            payload = _pairing.rendezvous_payload(code, hosts, 8737)
+            request = urllib.request.Request(
+                DEFAULT_PUSH_RELAY + "/rendezvous/"
+                + _pairing.rendezvous_id(code),
+                data=json.dumps({"payload": payload}).encode(),
+                headers={"Content-Type": "application/json",
+                         "User-Agent": "vibepulse-tokenserver"},
+                method="PUT")
+            open_url = (_default_urlopen if urlopen is _AUTO else urlopen)
+            with open_url(request, timeout=NETWORK_TIMEOUT_SECONDS):
+                pass
+            print("PASS The code also carries this computer's address — "
+                  "the watch finds the server by itself", file=stdout)
+    except Exception:
+        # Rendezvous is a convenience; the typed-address path still stands.
+        print("OFF Address rendezvous unavailable — enter the server "
+              "manually on the watch if it is not already set", file=stdout)
     print("", file=stdout)
     print(f"    Pairing code:  {code[:3]} {code[3:]}", file=stdout)
     print("", file=stdout)

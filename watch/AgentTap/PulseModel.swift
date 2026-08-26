@@ -64,14 +64,38 @@ final class PulseModel: ObservableObject {
     /// Redeem a pairing code; on success the key lands in the keychain and
     /// answering turns on immediately.
     func pair(code: String) async -> String {
+        // The code carries the computer's address (watchOS cannot browse
+        // Bonjour): find the server first, then claim on it directly.
+        if let found = await Rendezvous.fetch(code: code) {
+            for host in found.hosts {
+                let formatted = host.contains(":") ? "[\(host)]" : host
+                let base = "http://\(formatted):\(found.port)"
+                let probe = VibePulseClient(base: base)
+                let attempt = await probe.claimPairing(code: code)
+                if let key = attempt.key {
+                    serverBase = base
+                    return finishPairing(key: key, relay: attempt.relay)
+                }
+                if attempt.reason != "unreachable" {
+                    return attempt.reason  // reached a server; real verdict
+                }
+            }
+        }
         let result = await client.claimPairing(code: code)
         guard let key = result.key else { return result.reason }
+        return finishPairing(key: key, relay: result.relay)
+    }
+
+    private func finishPairing(key: String,
+                               relay relayConfig: RelayConfig?) -> String {
         KeyStore.save(key)
-        if let relayConfig = result.relay {
+        if let relayConfig {
             KeyStore.saveRelay(relayConfig)
         }
         signer = Signer(deviceKeyHex: key)
         relay = makeRelay()
+        lanFailures = 0
+        restartPolling()
         objectWillChange.send()
         return "ok"
     }

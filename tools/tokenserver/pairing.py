@@ -13,7 +13,13 @@ from __future__ import annotations
 import hmac
 import secrets
 import threading
+import base64
+import hashlib
 import json
+import socket
+import struct
+import subprocess
+import sys
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -116,3 +122,90 @@ def numbers_handout(state_dir: Path) -> Optional[str]:
     if isinstance(url, str) and url.startswith("https://") and "/u/" in url:
         return url
     return None
+
+
+# --- pairing rendezvous -----------------------------------------------------
+# Third-party watch apps cannot browse Bonjour on real watchOS, so the
+# 6-digit code doubles as the discovery channel: while it lives, the
+# computer parks its LAN address at the hosted relay under a HASH of the
+# code, encrypted with a key derived from the code. Stdlib-only crypto
+# (HMAC-SHA256 keystream + HMAC tag) so the tokenserver's no-dependency
+# promise holds; CryptoKit mirrors it on the watch.
+
+RENDEZVOUS_SALT = b"agenttap-rendezvous-v1"
+
+
+def _rendezvous_kmat(code: str) -> bytes:
+    return hashlib.sha256(RENDEZVOUS_SALT + b"|" + code.encode()).digest()
+
+
+def rendezvous_id(code: str) -> str:
+    return hashlib.sha256(RENDEZVOUS_SALT + b"|id|" + code.encode()).hexdigest()
+
+
+def _keystream(kmat: bytes, length: int) -> bytes:
+    out = b""
+    counter = 0
+    while len(out) < length:
+        out += hmac_sha256(kmat, b"ks" + struct.pack(">I", counter))
+        counter += 1
+    return out[:length]
+
+
+def hmac_sha256(key: bytes, msg: bytes) -> bytes:
+    import hmac as _hmac
+    return _hmac.new(key, msg, hashlib.sha256).digest()
+
+
+def rendezvous_encrypt(code: str, plaintext: bytes) -> str:
+    kmat = _rendezvous_kmat(code)
+    ct = bytes(a ^ b for a, b in zip(plaintext,
+                                     _keystream(kmat, len(plaintext))))
+    tag = hmac_sha256(kmat, b"tag" + ct)
+    return base64.urlsafe_b64encode(ct + tag).rstrip(b"=").decode()
+
+
+def rendezvous_decrypt(code: str, payload: str) -> Optional[bytes]:
+    try:
+        raw = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+    except Exception:
+        return None
+    if len(raw) <= 32:
+        return None
+    ct, tag = raw[:-32], raw[-32:]
+    kmat = _rendezvous_kmat(code)
+    import hmac as _hmac
+    if not _hmac.compare_digest(hmac_sha256(kmat, b"tag" + ct), tag):
+        return None
+    return bytes(a ^ b for a, b in zip(ct, _keystream(kmat, len(ct))))
+
+
+def local_addresses() -> list:
+    """The LAN IPv4s a watch could reach this computer on."""
+    hosts = []
+    if sys.platform == "darwin":
+        for iface in ("en0", "en1"):
+            try:
+                out = subprocess.run(
+                    ["ipconfig", "getifaddr", iface], capture_output=True,
+                    text=True, timeout=5).stdout.strip()
+                if out and out not in hosts:
+                    hosts.append(out)
+            except Exception:
+                pass
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.connect(("192.0.2.1", 9))
+        addr = probe.getsockname()[0]
+        probe.close()
+        if addr and not addr.startswith("127.") and addr not in hosts:
+            hosts.append(addr)
+    except OSError:
+        pass
+    return hosts
+
+
+def rendezvous_payload(code: str, hosts: list, port: int) -> str:
+    return rendezvous_encrypt(code, json.dumps(
+        {"hosts": hosts, "port": port, "v": 1},
+        separators=(",", ":")).encode())
