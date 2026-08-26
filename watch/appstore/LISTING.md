@@ -46,8 +46,8 @@ needed.
 
 **Keywords:** claude,codex,ai,agent,coding,developer,quota,monitor,vibepulse
 
-**Support URL:** (your repository URL)
-**Privacy Policy URL:** (host appstore/PRIVACY.md, e.g. GitHub)
+**Support URL:** https://github.com/Selva-Corp/agenttap-support
+**Privacy Policy URL:** https://github.com/Selva-Corp/agenttap-support/blob/main/PRIVACY.md
 
 
 **What's New in 1.1.0:**

@@ -16,7 +16,7 @@ This README is the complete setup, start to finish. Times are honest.
 |---|---|
 | A Mac signed in to **Claude Code** | That login IS the link to your Claude — no API key, ever |
 | Python 3.11+ (`python3 --version`) | Runs the tokenserver; pure stdlib |
-| This repository (`git clone …`) | The tokenserver and setup tools live here |
+| The repo: `git clone https://github.com/Selva-Corp/agenttap` | The tokenserver and setup tools live here |
 | **AgentTap** from the App Store | The watch app ($3.99) |
 | Apple Watch, watchOS 10+, paired iPhone | And on the same WiFi as the Mac for first-time setup |
 
