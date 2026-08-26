@@ -30,11 +30,28 @@ always falls back to the terminal.
 
 COMPLICATION — your tightest weekly quota on the watch face.
 
-Pairing takes one 6-digit code. Setup on the computer is two commands from
-the open-source repository. Try everything first with built-in demo mode —
-no server needed.
+PUSH — your wrist buzzes the moment an agent needs you, on any network,
+with the app closed. The notification is always generic; prompt text never
+leaves your own machine.
+
+ANYWHERE — with one extra command you deploy your own free, private,
+end-to-end-encrypted relays: rings, agent rows, and answering keep working
+when you're nowhere near your computer. The cloud stores only ciphertext
+you hold the keys to.
+
+Pairing takes one 6-digit code — it delivers every credential the watch
+needs. Setup on the computer is two commands from the open-source
+repository. Try everything first with built-in demo mode — no server
+needed.
 
 **Keywords:** claude,codex,ai,agent,coding,developer,quota,monitor,vibepulse
 
 **Support URL:** (your repository URL)
 **Privacy Policy URL:** (host appstore/PRIVACY.md, e.g. GitHub)
+
+
+**What's New in 1.1.0:**
+
+```
+Your wrist now buzzes the moment an agent needs you — on any network, app closed. And with one command you can deploy your own private, end-to-end-encrypted relays so quota rings, agent activity, and answering keep working anywhere, not just at home. Pairing still takes six digits, and now delivers everything: signing key, relay credentials, all of it. First launch also got friendlier: your computer is discovered automatically — tap its name and go.
+```
