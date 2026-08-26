@@ -104,3 +104,15 @@ def relay_handout(url: Optional[str], mailbox: Optional[str],
     if len(token) != 43:
         return None
     return {"url": url, "mailbox": mailbox, "panel_token": token}
+
+
+def numbers_handout(state_dir: Path) -> Optional[str]:
+    """The numbers-relay URL (secret embedded) pairing may hand a device."""
+    try:
+        raw = json.loads((state_dir / "numbers-relay.json").read_text())
+    except (OSError, ValueError):
+        return None
+    url = raw.get("url")
+    if isinstance(url, str) and url.startswith("https://") and "/u/" in url:
+        return url
+    return None

@@ -8,6 +8,9 @@ struct RelayConfig: Codable, Equatable {
     let url: String
     let mailbox: String
     let panelToken: String
+    /// Optional quota mailbox (secret embedded in the URL by design —
+    /// numbers only ever ride it). Absent in configs paired before it.
+    var numbersURL: String? = nil
 }
 
 final class RelayTransport {

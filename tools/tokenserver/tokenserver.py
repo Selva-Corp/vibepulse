@@ -101,7 +101,7 @@ else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     from codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
     from interactions import InteractionStore
-    from pairing import PairingGate, relay_handout
+    from pairing import PairingGate, numbers_handout, relay_handout
     from push_notify import ApnsConfig, ApnsSender, RelaySender
     from max_tracker import MaxTrackerStore
     from publisher import Publisher
@@ -2618,6 +2618,9 @@ class Handler(BaseHTTPRequestHandler):
                               self.interaction_mailbox_value)
         if relay is not None:
             payload["relay"] = relay
+        numbers = numbers_handout(_state_dir())
+        if numbers is not None:
+            payload["numbers_url"] = numbers
         self._send(200, payload)
 
     def do_GET(self):
@@ -3303,7 +3306,21 @@ def main():
                     "fortsätter", Handler.agent_status_relay_reason)
 
     relay_publisher = None
-    if args.publish:
+    publish_url = args.publish
+    if not publish_url:
+        # Config-driven like apns.json: launchd commands never go stale.
+        try:
+            _numbers_cfg = json.loads(
+                (_state_dir() / "numbers-relay.json").read_text())
+            candidate = _numbers_cfg.get("url")
+            if isinstance(candidate, str) and \
+                    candidate.startswith("https://"):
+                publish_url = candidate
+                log.info("siffror publiceras till användarens eget relä "
+                         "(url ur numbers-relay.json)")
+        except (OSError, ValueError):
+            pass
+    if publish_url:
         # Producenterna ÄR handlarnas: reläet kan aldrig glida ifrån det
         # LAN-endpointsen serverar. Agentstatus och Needs You publiceras
         # medvetet inte — reläet bär siffror, aldrig aktivitet (samma gräns
@@ -3328,7 +3345,7 @@ def main():
                     else disabled_snapshot())
 
         machine = args.publish_name or socket.gethostname().split(".")[0]
-        relay_publisher = Publisher(args.publish, machine, {
+        relay_publisher = Publisher(publish_url, machine, {
             "/api/tokens": _tokens_payload,
             "/api/max-tracker": _tracker_payload,
             "/api/github": _github_payload,

@@ -93,3 +93,18 @@ class RelayHandoutTest(unittest.TestCase):
                 relay_handout("https://r", "vp_abcdefgh12345678", home=home),
                 {"url": "https://r", "mailbox": "vp_abcdefgh12345678",
                  "panel_token": "A" * 43})
+
+    def test_numbers_handout_requires_secret_bearing_https(self):
+        import json, tempfile
+        from pairing import numbers_handout
+        with tempfile.TemporaryDirectory() as tmp:
+            state = pathlib.Path(tmp)
+            self.assertIsNone(numbers_handout(state))
+            cfg = state / "numbers-relay.json"
+            cfg.write_text(json.dumps({"url": "http://insecure/u/x"}))
+            self.assertIsNone(numbers_handout(state))
+            cfg.write_text(json.dumps({"url": "https://r.example/api"}))
+            self.assertIsNone(numbers_handout(state))
+            good = "https://n.example.workers.dev/u/" + "a" * 64
+            cfg.write_text(json.dumps({"url": good}))
+            self.assertEqual(numbers_handout(state), good)

@@ -92,8 +92,9 @@ final class VibePulseClient {
                let url = r["url"] as? String,
                let mailbox = r["mailbox"] as? String,
                let token = r["panel_token"] as? String, token.count == 43 {
-                relay = RelayConfig(url: url, mailbox: mailbox,
-                                    panelToken: token)
+                relay = RelayConfig(
+                    url: url, mailbox: mailbox, panelToken: token,
+                    numbersURL: body?["numbers_url"] as? String)
             }
             return (key, relay, "ok")
         }

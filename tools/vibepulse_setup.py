@@ -151,6 +151,11 @@ def _parser() -> argparse.ArgumentParser:
         help="enable or disable INSECURE compatibility for old Claude panel "
              "firmware; default off and never applies to Codex")
 
+    commands.add_parser(
+        "anywhere", help="one command for away-from-home: deploys your "
+        "private encrypted relays (Cloudflare, free), enables them, and "
+        "prints the pairing step")
+
     push = commands.add_parser(
         "push", help="enable Needs You push notifications to the watch "
         "using an APNs auth key (.p8)")
@@ -1369,6 +1374,136 @@ def _wizard_watch(*, path: Path, providers: str, detail: bool | None,
         _default_urlopen if urlopen is _AUTO else urlopen)) else 1
 
 
+_WRANGLER_BIN = (REPO_ROOT / "tools" / "interaction-relay" /
+                 "node_modules" / ".bin" / "wrangler")
+
+
+def _wrangler_subdomain(stdout) -> Optional[str]:
+    """The account's workers.dev subdomain, via wrangler's own session."""
+    config = (Path.home() / "Library" / "Preferences" / ".wrangler" /
+              "config" / "default.toml")
+    try:
+        token = None
+        for line in config.read_text().splitlines():
+            if line.strip().startswith("oauth_token"):
+                token = line.split("=", 1)[1].strip().strip('"')
+                break
+        if not token:
+            return None
+        whoami = _invoke([str(_WRANGLER_BIN), "whoami"], _AUTO)
+        if whoami is None:
+            return None
+        account = None
+        for line in whoami.stdout.splitlines():
+            for cell in line.split("│"):
+                cell = cell.strip()
+                if re.fullmatch(r"[0-9a-f]{32}", cell):
+                    account = cell
+        if account is None:
+            return None
+        request = urllib.request.Request(
+            "https://api.cloudflare.com/client/v4/accounts/"
+            f"{account}/workers/subdomain",
+            headers={"Authorization": "Bearer " + token,
+                     "User-Agent": "vibepulse-tokenserver"})
+        with _default_urlopen(request,
+                              timeout=NETWORK_TIMEOUT_SECONDS) as response:
+            payload = json.loads(response.read(MAX_DIAGNOSTIC_BYTES))
+        sub = payload.get("result", {}).get("subdomain")
+        return sub if isinstance(sub, str) and sub else None
+    except Exception:
+        return None
+
+
+def _anywhere(*, stdout, run=_AUTO) -> int:
+    """Deploy + enable both user-owned relays, end with the pairing step."""
+    print("AgentTap anywhere setup — your own private relays, free tier.",
+          file=stdout)
+    if not _WRANGLER_BIN.exists():
+        print("FIX Run once first:  cd tools/interaction-relay && npm ci",
+              file=stdout)
+        return 1
+    whoami = _invoke([str(_WRANGLER_BIN), "whoami"], run)
+    if whoami is None or "logged in" not in (whoami.stdout or "").lower():
+        print("FIX Log in to Cloudflare first (free account):\n"
+              "    cd tools/interaction-relay && npx wrangler login",
+              file=stdout)
+        return 1
+    sub = _wrangler_subdomain(stdout)
+    if sub is None:
+        print("FIX Could not determine your workers.dev subdomain — "
+              "deploy any worker once, or register it in the Cloudflare "
+              "dash, then re-run", file=stdout)
+        return 1
+    print(f"PASS Cloudflare account ready (subdomain {sub})", file=stdout)
+
+    relay_url = f"https://vibepulse-interaction-relay.{sub}.workers.dev"
+    for argv in (
+        [sys.executable, __file__, "relay", "install", "--url", relay_url,
+         "--yes-e2e-cloud"],
+        [sys.executable, __file__, "relay", "enable-status",
+         "--yes-e2e-cloud"],
+    ):
+        completed = _invoke(argv, run)
+        out = ((completed.stdout or "") + (completed.stderr or "")
+               if completed else "")
+        if completed is None or completed.returncode != 0:
+            already = "already" in out.lower()
+            if not already:
+                print("FIX Relay step failed:\n" + out[-400:], file=stdout)
+                return 1
+    print("PASS Encrypted decision + agent-status relays live at "
+          + relay_url, file=stdout)
+
+    numbers_cfg = str(REPO_ROOT / "tools" / "numbers-relay" /
+                      "wrangler.jsonc")
+    deployed = _invoke([str(_WRANGLER_BIN), "deploy",
+                        "--config", numbers_cfg], run)
+    if deployed is None or deployed.returncode != 0:
+        print("FIX Numbers relay deploy failed:\n"
+              + ((deployed.stdout or "") + (deployed.stderr or ""))[-400:]
+              if deployed else "FIX Numbers relay deploy failed",
+              file=stdout)
+        return 1
+    secret = secrets.token_hex(32)
+    put = _invoke_with_input(
+        [str(_WRANGLER_BIN), "secret", "put", "RELAY_SECRET",
+         "--config", numbers_cfg], secret, run)
+    if put is None or put.returncode != 0:
+        print("FIX Could not store the numbers relay secret", file=stdout)
+        return 1
+    state = (Path(os.environ["LOCALAPPDATA"]) / "VibePulse"
+             if sys.platform == "win32" and os.environ.get("LOCALAPPDATA")
+             else Path.home() / "Library" / "Application Support" /
+             "VibePulse")
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "numbers-relay.json").write_text(json.dumps(
+        {"url": f"https://agenttap-numbers.{sub}.workers.dev/u/{secret}"},
+        indent=2))
+    print("PASS Quota relay live — rings work anywhere", file=stdout)
+    print("", file=stdout)
+    print("Last two steps:", file=stdout)
+    print("  1. Restart the tokenserver (or it restarts at next login).",
+          file=stdout)
+    print("  2. Re-pair the watch:  python3 tools/vibepulse_setup.py pair",
+          file=stdout)
+    print("     (the 6 digits deliver all relay credentials — nothing to "
+          "type but the code)", file=stdout)
+    return 0
+
+
+def _invoke_with_input(argv, text, run):
+    if run is _AUTO:
+        try:
+            return subprocess.run(
+                [str(v) for v in argv], input=text, capture_output=True,
+                text=True, timeout=120, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+    return run([str(v) for v in argv], input=text, capture_output=True,
+               text=True, timeout=120, check=False, shell=False)
+
+
 def _pair(*, stdout, urlopen=urllib.request.urlopen) -> bool:
     """Arm one-shot pairing on the running tokenserver and show the code.
 
@@ -2173,6 +2308,9 @@ def main(
                 token_path=relay_token, secrets_path=secrets_header,
                 service_dir=relay_service, run=run,
                 stdout=output) else 1
+
+        if args.command == "anywhere":
+            return _anywhere(stdout=output, run=run)
 
         if args.command == "push":
             state = (Path(os.environ["LOCALAPPDATA"]) / "VibePulse"

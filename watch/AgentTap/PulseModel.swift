@@ -137,6 +137,11 @@ final class PulseModel: ObservableObject {
                     if let snap = await self.client.fetchTokens() {
                         self.tokens = snap
                         WidgetCenter.shared.reloadAllTimelines()
+                    } else if let snap = await self.fetchTokensViaRelay() {
+                        // The numbers mailbox refreshes at most every 300 s
+                        // server-side; the 30 s check just picks changes up.
+                        self.tokens = snap
+                        WidgetCenter.shared.reloadAllTimelines()
                     }
                     lastTokens = Date()
                 }
@@ -145,6 +150,20 @@ final class PulseModel: ObservableObject {
                     self.viaRelay ? 5_000_000_000 : 1_000_000_000)
             }
         }
+    }
+
+    private func fetchTokensViaRelay() async -> TokensSnapshot? {
+        guard let numbers = KeyStore.loadRelay()?.numbersURL,
+              let url = URL(string: numbers + "/api/tokens") else {
+            return nil
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 8
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else {
+            return nil
+        }
+        return TokensSnapshot.parse(data)
     }
 
     private func pollRelayOnce(_ relay: RelayTransport) async {

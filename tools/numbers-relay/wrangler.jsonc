@@ -1,0 +1,20 @@
+// AgentTap's user-owned numbers relay: the SAME engine as tools/relay
+// (worker.js + merge.js, imported in place — zero forked logic), deployed
+// fresh per user. No KV binding: the legacy bootstrap/rollback path in
+// tools/relay belongs to the original private deployment; a new account
+// has no such data to preserve.
+{
+  "name": "agenttap-numbers",
+  "main": "../relay/worker.js",
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [
+      { "name": "NUMBERS_MAILBOX", "class_name": "NumbersMailbox" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["NumbersMailbox"] }
+  ]
+}
