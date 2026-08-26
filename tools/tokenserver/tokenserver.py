@@ -101,7 +101,7 @@ else:  # direktkörning: python3 tools/tokenserver/tokenserver.py
     from codex_rollout import codex_rollout_rate_limits, observation_timestamp
     from github_monitor import GitHubMonitor, disabled_snapshot, normalize_repo
     from interactions import InteractionStore
-    from pairing import PairingGate
+    from pairing import PairingGate, relay_handout
     from push_notify import ApnsConfig, ApnsSender, RelaySender
     from max_tracker import MaxTrackerStore
     from publisher import Publisher
@@ -2094,6 +2094,8 @@ class Handler(BaseHTTPRequestHandler):
     plans = {"claude": None, "codex": None}  # sätts i main från --*-plan
     interaction_store = None  # "Needs You", av som standard; sätts i main
     pairing_gate = None  # 6-siffrig parning; sätts i main
+    interaction_relay_url_value = None   # för parningens relä-utlämning
+    interaction_mailbox_value = None
     apns_sender = None  # Needs You-puffar; sätts i main när nyckel finns
     interaction_timeout_s = 120.0  # sätts i main från --interaction-timeout
     claude_interactions = False
@@ -2611,7 +2613,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         log.info("parning slutförd mot %s — koden är förbrukad",
                  self.address_string())
-        self._send(200, {"ok": True, "device_key": key})
+        payload = {"ok": True, "device_key": key}
+        relay = relay_handout(self.interaction_relay_url_value,
+                              self.interaction_mailbox_value)
+        if relay is not None:
+            payload["relay"] = relay
+        self._send(200, payload)
 
     def do_GET(self):
         if self.path == "/api/tokens":
@@ -3227,6 +3234,8 @@ def main():
     Handler.plans = {"claude": args.claude_plan, "codex": args.codex_plan}
 
     Handler.pairing_gate = PairingGate(interactions.read_device_key)
+    Handler.interaction_relay_url_value = interaction_config.interaction_relay_url
+    Handler.interaction_mailbox_value = interaction_config.interaction_mailbox
     apns_config = ApnsConfig.load(_state_dir() / "apns.json")
     if apns_config is not None and ApnsSender.crypto_available():
         Handler.apns_sender = ApnsSender(

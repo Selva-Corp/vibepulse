@@ -13,6 +13,8 @@ from __future__ import annotations
 import hmac
 import secrets
 import threading
+import json
+from pathlib import Path
 from typing import Callable, Optional
 
 
@@ -81,3 +83,24 @@ class PairingGate:
         self._code = None
         self._expires_at = 0.0
         self._attempts_left = 0
+
+
+def relay_handout(url: Optional[str], mailbox: Optional[str],
+                  home: Optional[Path] = None) -> Optional[dict]:
+    """The relay credentials pairing may hand a device, or None.
+
+    Panel-role only — the Mac token never leaves this computer. Handed out
+    solely through a successful pairing claim, which already proves the
+    same possession the device key itself requires.
+    """
+    if not url or not mailbox:
+        return None
+    token_path = (home or Path.home()) / \
+        ".vibepulse-interaction-relay-panel-token"
+    try:
+        token = token_path.read_text().strip()
+    except OSError:
+        return None
+    if len(token) != 43:
+        return None
+    return {"url": url, "mailbox": mailbox, "panel_token": token}

@@ -16,12 +16,38 @@ final class PulseModel: ObservableObject {
     @Published var lastAnswer: AnswerResult?
     @Published var reachable = true
     @Published var netError: String?
+    /// True while data is arriving over the encrypted relay instead of LAN.
+    @Published var viaRelay = false
 
     private var client: VibePulseClient
     // Runtime pairing (keychain) wins over a key baked in at build time.
     private var signer = Signer(deviceKeyHex: KeyStore.load() ?? DeviceKey.hex)
     private var answered = AnsweredRing()
     private var pollTask: Task<Void, Never>?
+    private var relay: RelayTransport?
+    private var lanFailures = 0
+
+    private func makeRelay() -> RelayTransport? {
+        guard let config = KeyStore.loadRelay() else { return nil }
+        return RelayTransport(config: config, deviceKeyHex: signingKeyHex)
+    }
+
+    private func relayOrMake() -> RelayTransport? {
+        if relay == nil { relay = makeRelay() }
+        return relay
+    }
+
+    var relayConfigured: Bool { KeyStore.loadRelay() != nil }
+
+    var serverConfigured: Bool { !serverBase.isEmpty }
+
+    /// Tap-to-select from discovery: resolve to a raw IP first so physical
+    /// watches never depend on .local lookups.
+    func selectServer(_ found: ServerDiscovery.Found) async {
+        serverBase = await ServerDiscovery.resolve(found)
+        lanFailures = 0
+        restartPolling()
+    }
 
     var serverBase: String {
         get { storedBase.isEmpty ? GeneratedDefaults.serverBase : storedBase }
@@ -41,7 +67,11 @@ final class PulseModel: ObservableObject {
         let result = await client.claimPairing(code: code)
         guard let key = result.key else { return result.reason }
         KeyStore.save(key)
+        if let relayConfig = result.relay {
+            KeyStore.saveRelay(relayConfig)
+        }
         signer = Signer(deviceKeyHex: key)
+        relay = makeRelay()
         objectWillChange.send()
         return "ok"
     }
@@ -89,10 +119,19 @@ final class PulseModel: ObservableObject {
                 guard let self else { return }
                 if let status = await self.client.fetchAgentStatus() {
                     self.reachable = true
+                    self.viaRelay = false
+                    self.lanFailures = 0
                     self.apply(status)
                 } else {
-                    self.reachable = false
+                    self.lanFailures += 1
                     self.netError = self.client.lastError
+                    // Two straight LAN misses and a paired relay: go remote.
+                    if self.lanFailures >= 2,
+                       let relay = self.relayOrMake() {
+                        await self.pollRelayOnce(relay)
+                    } else {
+                        self.reachable = false
+                    }
                 }
                 if Date().timeIntervalSince(lastTokens) >= 30 {
                     if let snap = await self.client.fetchTokens() {
@@ -101,8 +140,38 @@ final class PulseModel: ObservableObject {
                     }
                     lastTokens = Date()
                 }
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                // Relay polls pace at 5 s like the panel; LAN at 1 Hz.
+                try? await Task.sleep(nanoseconds:
+                    self.viaRelay ? 5_000_000_000 : 1_000_000_000)
             }
+        }
+    }
+
+    private func pollRelayOnce(_ relay: RelayTransport) async {
+        var sawAnything = false
+        if let status = await relay.fetchStatus() {
+            agents = status
+            sawAnything = true
+        }
+        if let pending = await relay.fetchNext() {
+            sawAnything = true
+            if presented?.requestID == pending.requestID {
+                presented = pending
+            } else if !answered.contains(pending.requestID),
+                      pending.expiresInMS >= 3000 {
+                presented = pending
+            }
+        } else if presented?.relayChallenge != nil {
+            // Nothing pending relay-side anymore (answered elsewhere or
+            // expired) — drop a relay-presented card.
+            presented = nil
+        }
+        if sawAnything {
+            reachable = true
+            viaRelay = true
+        } else {
+            reachable = false
+            viaRelay = false
         }
     }
 
@@ -131,7 +200,14 @@ final class PulseModel: ObservableObject {
             presented = nil
             return
         }
-        let result = await client.answer(p, verdict: verdict, signer: signer)
+        let result: AnswerResult
+        if p.relayChallenge != nil, let relay = relayOrMake() {
+            let ok = await relay.postVerdict(p, verdict: verdict)
+            result = AnswerResult(ok: ok,
+                                  reason: ok ? "ok (relay)" : "relay failed")
+        } else {
+            result = await client.answer(p, verdict: verdict, signer: signer)
+        }
         lastAnswer = result
         answered.mark(p.requestID)
         presented = nil

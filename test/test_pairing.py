@@ -72,3 +72,24 @@ class PairingGateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RelayHandoutTest(unittest.TestCase):
+    def test_handout_requires_config_and_valid_token(self):
+        import tempfile
+        from pairing import relay_handout
+        with tempfile.TemporaryDirectory() as tmp:
+            home = pathlib.Path(tmp)
+            self.assertIsNone(relay_handout(None, "vp_x" * 4, home=home))
+            self.assertIsNone(relay_handout("https://r", None, home=home))
+            self.assertIsNone(
+                relay_handout("https://r", "vp_abcdefgh12345678", home=home))
+            tok = home / ".vibepulse-interaction-relay-panel-token"
+            tok.write_text("short\n")
+            self.assertIsNone(
+                relay_handout("https://r", "vp_abcdefgh12345678", home=home))
+            tok.write_text("A" * 43 + "\n")
+            self.assertEqual(
+                relay_handout("https://r", "vp_abcdefgh12345678", home=home),
+                {"url": "https://r", "mailbox": "vp_abcdefgh12345678",
+                 "panel_token": "A" * 43})

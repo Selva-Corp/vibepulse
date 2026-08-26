@@ -74,21 +74,30 @@ final class VibePulseClient {
 
     /// Redeem a 6-digit pairing code for the device key. The code was armed
     /// on the computer via `vibepulse_setup.py pair` and is single-use.
-    func claimPairing(code: String) async -> (key: String?, reason: String) {
+    func claimPairing(code: String) async
+        -> (key: String?, relay: RelayConfig?, reason: String) {
         var req = URLRequest(url: baseURL.appendingPathComponent("api/pair/claim"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = Data("{\"code\":\"\(code.filter(\.isNumber))\"}".utf8)
         guard let (data, resp) = try? await session.data(for: req),
               let http = resp as? HTTPURLResponse else {
-            return (nil, "unreachable")
+            return (nil, nil, "unreachable")
         }
         let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         if http.statusCode == 200,
            let key = body?["device_key"] as? String, key.count == 64 {
-            return (key, "ok")
+            var relay: RelayConfig? = nil
+            if let r = body?["relay"] as? [String: Any],
+               let url = r["url"] as? String,
+               let mailbox = r["mailbox"] as? String,
+               let token = r["panel_token"] as? String, token.count == 43 {
+                relay = RelayConfig(url: url, mailbox: mailbox,
+                                    panelToken: token)
+            }
+            return (key, relay, "ok")
         }
-        return (nil, body?["reason"] as? String ?? "http \(http.statusCode)")
+        return (nil, nil, body?["reason"] as? String ?? "http \(http.statusCode)")
     }
 
     func panic(signer: Signer) async -> AnswerResult {

@@ -3,17 +3,38 @@ import SwiftUI
 
 struct GlanceView: View {
     @EnvironmentObject var model: PulseModel
+    @StateObject private var discovery = ServerDiscovery()
 
     var body: some View {
         VStack(spacing: 6) {
-            if !model.reachable && !model.demoMode {
-                Label("Mac unreachable", systemImage: "wifi.slash")
-                    .font(.footnote)
+            if model.viaRelay {
+                Label("Via relay", systemImage: "cloud")
+                    .font(.system(size: 10))
                     .foregroundStyle(Theme.muted)
-                if let err = model.netError {
-                    Text(err)
-                        .font(.system(size: 10, design: .monospaced))
+            }
+            if !model.reachable && !model.demoMode {
+                if model.serverConfigured {
+                    Label("Mac unreachable", systemImage: "wifi.slash")
+                        .font(.footnote)
                         .foregroundStyle(Theme.muted)
+                    if let err = model.netError {
+                        Text(err)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Theme.muted)
+                    }
+                } else {
+                    Text("Choose your computer")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
+                }
+                ForEach(discovery.servers) { found in
+                    Button {
+                        Task { await model.selectServer(found) }
+                    } label: {
+                        Label(found.name, systemImage: "desktopcomputer")
+                            .font(.footnote)
+                    }
+                    .buttonStyle(.bordered)
                 }
                 Button("Try demo mode") { model.demoMode = true }
                     .font(.footnote)
@@ -30,6 +51,8 @@ struct GlanceView: View {
             }
         }
         .navigationTitle("AgentTap")
+        .onAppear { if !model.reachable { discovery.start() } }
+        .onDisappear { discovery.stop() }
     }
 
     @ViewBuilder

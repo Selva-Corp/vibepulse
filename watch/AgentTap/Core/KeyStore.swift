@@ -39,6 +39,50 @@ enum KeyStore {
         return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
+    private static let relayAccount = "relay-config"
+
+    static func loadRelay() -> RelayConfig? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: relayAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item)
+                == errSecSuccess,
+              let data = item as? Data else { return nil }
+        return try? JSONDecoder().decode(RelayConfig.self, from: data)
+    }
+
+    @discardableResult
+    static func saveRelay(_ config: RelayConfig) -> Bool {
+        guard let data = try? JSONEncoder().encode(config) else {
+            return false
+        }
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: relayAccount,
+        ]
+        SecItemDelete(base as CFDictionary)
+        var add = base
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] =
+            kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+    }
+
+    static func clearRelay() {
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: relayAccount,
+        ]
+        SecItemDelete(base as CFDictionary)
+    }
+
     static func clear() {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

@@ -522,6 +522,8 @@ class InteractionRelay:
         headers = (
             ("Authorization", f"Bearer {self._mac_token}"),
             ("Accept", "application/json"),
+            # Cloudflare's edge 403s the default Python-urllib agent.
+            ("User-Agent", "vibepulse-tokenserver"),
         )
         if body:
             headers += (("Content-Type", "application/json"),)

@@ -13,8 +13,10 @@ struct SettingsView: View {
             Section("Server") {
                 ForEach(discovery.servers) { found in
                     Button {
-                        base = found.url
-                        model.serverBase = found.url
+                        Task {
+                            await model.selectServer(found)
+                            base = model.serverBase
+                        }
                     } label: {
                         Label(found.name, systemImage:
                               model.serverBase == found.url

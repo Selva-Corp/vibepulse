@@ -928,6 +928,12 @@ def _relay_install(
                 _with_relay_block(secrets_text, block).encode("utf-8"))
             _atomic_private_write(
                 token_path, (mac_token + "\n").encode("ascii"))
+            # Panel-role credential, persisted so runtime pairing can hand
+            # the full relay config to a watch — same trust gate as the
+            # device key itself.
+            _atomic_private_write(
+                Path.home() / ".vibepulse-interaction-relay-panel-token",
+                (panel_token + "\n").encode("ascii"))
             _publish_config(path, snapshot, target)
         except BaseException:
             try:
@@ -981,6 +987,7 @@ def _relay_ownership_probe(
         headers={
             "Accept": "application/json",
             "Authorization": "Bearer " + token,
+            "User-Agent": "vibepulse-tokenserver",
         },
         method="GET")
     open_url = _default_urlopen if urlopen is _AUTO else urlopen

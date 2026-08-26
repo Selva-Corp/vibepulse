@@ -91,6 +91,10 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
     sources:
       - AgentTapTests
+      - path: AgentTapTests/interaction-relay-v1.json
+        buildPhase: resources
+      - path: AgentTapTests/agent-status-relay-v1.json
+        buildPhase: resources
       - AgentTap/Core
 schemes:
   AgentTapStore:

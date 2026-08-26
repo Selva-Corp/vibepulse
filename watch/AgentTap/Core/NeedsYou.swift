@@ -20,6 +20,9 @@ struct Pending: Equatable, Identifiable {
     var canApprove: Bool
     var viewSHA256: String
     var fetchedAt: Date
+    /// Set when this decision arrived over the encrypted relay; the 32-byte
+    /// challenge the verdict must echo.
+    var relayChallenge: Data? = nil
 
     var id: String { requestID }
     var isQuestion: Bool { kind == "question" }
@@ -67,6 +70,35 @@ struct Pending: Equatable, Identifiable {
             tool: str(d, "tool"), prompt: str(d, "prompt"),
             title: str(d, "title"), subtitle: str(d, "subtitle"),
             canApprove: canApprove, viewSHA256: digest, fetchedAt: fetchedAt)
+    }
+
+    /// Builds a Pending from the relay's decrypted view bytes. The view IS
+    /// the canonical JSON, so fidelity is proven by re-serializing and
+    /// demanding byte equality — the same guarantee as the LAN digest check.
+    static func fromViewBytes(_ view: Data, viewSha256: Data,
+                              expiresInMS: Int,
+                              fetchedAt: Date = Date()) -> Pending? {
+        guard let d = (try? JSONSerialization.jsonObject(with: view))
+                as? [String: Any],
+              let requestID = str(d, "request_id"), !requestID.isEmpty,
+              let provider = str(d, "provider"),
+              provider == "claude" || provider == "codex",
+              let kind = str(d, "kind"),
+              kind == "question" || kind == "approval",
+              let hold = int(d, "hold_ms"), hold > 0,
+              let canApprove = bool(d, "can_approve") else { return nil }
+        let digestHex = viewSha256.map { String(format: "%02x", $0) }
+            .joined()
+        let pending = Pending(
+            requestID: requestID, provider: provider, kind: kind,
+            project: str(d, "project"), expiresInMS: expiresInMS,
+            holdMS: hold, optionsTotal: int(d, "options_total"),
+            marked: bool(d, "marked"), tool: str(d, "tool"),
+            prompt: str(d, "prompt"), title: str(d, "title"),
+            subtitle: str(d, "subtitle"), canApprove: canApprove,
+            viewSHA256: digestHex, fetchedAt: fetchedAt)
+        guard Data(pending.canonicalView.utf8) == view else { return nil }
+        return pending
     }
 
     // MARK: canonical view (must byte-match Python json.dumps(sort_keys=True,
